@@ -1,0 +1,125 @@
+CONTENTS OF THIS PACKAGE
+-------------------------
+
+* Introduction
+* Design options
+* Design repurcussions/drawbacks
+* Efficiency Analysis and assumptions
+* Possible improvements
+* Execution environment 
+* Debugging/testing gotchas
+* How to run the test
+
+* Introduction
+This is the sample solution for the takehome programming assignment
+
+* Design options
+1) Database
+
+We could have simply used a RDB or a KV store.
+As each server responds with a json, split the json
+in to a DB row and insert in to the DB.
+Then run a SQL command to do the roll up of the data
+
+A KV store of the equivalent of a multimap will be
+equally good enough with each Application
+representing a key and the json representing the value
+object
+
+2) Multithreaded python solution
+
+We go through the list of servers in servers.txt and
+create and Multiprocessing Queue in Python.
+Spawn threads (or processes in this case) and
+make a request to the twitter server.
+Each process creates its own scratch *.raw file, which
+has the json results from all the servers it GET from.
+
+Finally, merge all of these individual json files
+together to get a single large unordered json.
+
+Once you get the merged json file, read it all in.
+We use the sorted() python library to sort
+based on application, then success count in descending order
+and version
+Once done, we group by the application key to an iterator
+Scroll through the iterator. We create a dictionary whose
+key will be "Application" and values will be a list of
+json content responses.
+We dump this info in to a downstream file for further
+processing.
+Also, go through the iterator again and dump the
+success count on console
+
+* Design repurcussions/drawbacks
+
+Reading the final merged file in a single scoop in to the memory
+will be an issue if the servers.txt has say 100 million servers
+In that case, we need to read servers.txt in terms of say
+10K lines each using islice() file read, something like this:
+
+server_list = list(islice(infile, 10000))
+
+Then, add these servers to a list and let a bunch of worker
+threads to do the GET request, and eventually merge all those files
+The merge of the files also has to be done 2 files at a time.
+Eventually, you get a giant merged response.json which needs to
+be sorted and grouped
+
+* Efficiency Analysis and assumptions
+    Assumptions:
+        K = 16 in this code - Number of worker processes
+        O(1) - open() and close()
+        O(K) - for process spawning. We keep the countJobs to only 16
+               to avoid too many processes
+        O(1) - multiprocess Queue.add() and pop() 
+               Since the lock contention is taken care of by
+               underlying infrastructure, we tend to abuse this
+    Efficiency:
+        1) Create server url queue ==> O( Open() + read 1000 lines + create Queue
+                                         + close())
+        2) Server requests ==> K*O(N/K) ~ K * O(N)
+        3) Merge scratch files ==> O( K * Open() + merge)
+        4) Sort and group ==> O(N log N) : Assuming Python does efficiently
+        5) Write of downstream file  and display console ==> 2 * O(N) ~ O(N)
+
+* Possible improvements
+
+Described in the section above for an example 1 million servers
+
+* Execution environment
+    Python3
+    CentOS Linux release 7.2.1511 (Core)
+    Intel(R) Core(TM) i5-4670 CPU @ 3.40GHz
+    System Memory: 31.2 GB
+
+* Debugging/testing gotchas
+Since the twitter servers were fictitious, I instead used the following URL -
+"http://md5.jsontest.com/?text=example_text"
+It returns a sample json which I used to test the scratch file
+creation and merging the scratch files.
+I merged these individual files.
+For the final step of grouping together the results,
+to test, I used the given responses.txt as the test input
+file to see if the sort() and group() functions work correctly
+
+Till the time the response from the twitter servers are the
+same as what is shown in responses.txt, this code must work fine
+
+To run the real test, servers.txt must have real reachable servers
+
+* How to run the test
+
+    python3 takehome_koushik_twtr.py <servers.txt> <downstream.json>
+
+    ln70-ksampath:~/twtr:>python3 takehome_koushik_twtr.py servers.txt mymerged.json
+    Application: Cache0    successful calls: 93
+    Application: Cache1    successful calls: 113
+    Application: Cache2    successful calls: 102
+    Application: Database0     successful calls: 106
+    Application: Database1     successful calls: 113
+    Application: Database2     successful calls: 114
+    Application: Webapp0   successful calls: 126
+    Application: Webapp1   successful calls: 119
+    Application: Webapp2   successful calls: 114
+    ln70-ksampath:~/twtr:>
